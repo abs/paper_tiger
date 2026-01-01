@@ -18,7 +18,7 @@ defmodule PaperTiger.MixProject do
 
       # Hex package
       package: package(),
-      description: "A stateful mock Stripe server for testing Elixir applications - looks fierce, completely harmless",
+      description: "A stateful mock Stripe server for testing Elixir applications",
       source_url: @url,
       homepage_url: @url,
 
