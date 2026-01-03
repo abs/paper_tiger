@@ -348,7 +348,7 @@ defmodule PaperTiger.Resources.Invoice do
     now = PaperTiger.now()
     currency = Map.get(params, :currency, "usd")
     invoice_id = generate_id("in", Map.get(params, :id))
-    total = Map.get(params, :total, 0)
+    total = get_integer(params, :total, 0)
 
     # Allow provided lines or use empty default
     default_lines = %{
@@ -360,15 +360,35 @@ defmodule PaperTiger.Resources.Invoice do
 
     lines = Map.get(params, :lines, default_lines)
 
+    # Handle charge - empty string should be treated as nil
+    charge = normalize_optional_string(params, :charge)
+
+    # Use get_optional_integer for created to handle string->integer conversion
+    created = get_optional_integer(params, :created) || now
+    period_start = get_optional_integer(params, :period_start) || now
+    period_end = get_optional_integer(params, :period_end) || now
+
+    # Build status_transitions - accept from params or generate defaults
+    status = Map.get(params, :status, "draft")
+    default_status_transitions = build_default_status_transitions(status, now)
+
+    status_transitions =
+      case Map.get(params, :status_transitions) do
+        nil -> default_status_transitions
+        transitions -> normalize_status_transitions(transitions)
+      end
+
     %{
       id: invoice_id,
       object: "invoice",
-      created: Map.get(params, :created, now),
-      status: Map.get(params, :status, "draft"),
+      charge: charge,
+      created: created,
+      status: status,
+      status_transitions: status_transitions,
       customer: Map.get(params, :customer),
-      amount_due: Map.get(params, :amount_due, total),
-      amount_paid: Map.get(params, :amount_paid, 0),
-      amount_remaining: Map.get(params, :amount_remaining, total),
+      amount_due: get_integer(params, :amount_due, total),
+      amount_paid: get_integer(params, :amount_paid, 0),
+      amount_remaining: get_integer(params, :amount_remaining, total),
       currency: currency,
       description: Map.get(params, :description),
       metadata: Map.get(params, :metadata, %{}),
@@ -388,12 +408,12 @@ defmodule PaperTiger.Resources.Invoice do
       next_payment_attempt: nil,
       number: nil,
       paid: Map.get(params, :paid, false),
-      period_end: Map.get(params, :period_end, now),
-      period_start: Map.get(params, :period_start, now),
+      period_end: period_end,
+      period_start: period_start,
       receipt_number: nil,
       starting_balance: 0,
       statement_descriptor: Map.get(params, :statement_descriptor),
-      subtotal: Map.get(params, :subtotal, total),
+      subtotal: get_integer(params, :subtotal, total),
       tax: nil,
       total: total,
       webhooks_delivered_at: nil
@@ -452,5 +472,84 @@ defmodule PaperTiger.Resources.Invoice do
   defp maybe_expand(invoice, params) do
     expand_params = parse_expand_params(params)
     PaperTiger.Hydrator.hydrate(invoice, expand_params)
+  end
+
+  # Build default status_transitions based on invoice status
+  defp build_default_status_transitions("paid", now) do
+    %{
+      finalized_at: now,
+      marked_uncollectible_at: nil,
+      paid_at: now,
+      voided_at: nil
+    }
+  end
+
+  defp build_default_status_transitions("open", now) do
+    %{
+      finalized_at: now,
+      marked_uncollectible_at: nil,
+      paid_at: nil,
+      voided_at: nil
+    }
+  end
+
+  defp build_default_status_transitions("void", now) do
+    %{
+      finalized_at: now,
+      marked_uncollectible_at: nil,
+      paid_at: nil,
+      voided_at: now
+    }
+  end
+
+  defp build_default_status_transitions("uncollectible", now) do
+    %{
+      finalized_at: now,
+      marked_uncollectible_at: now,
+      paid_at: nil,
+      voided_at: nil
+    }
+  end
+
+  defp build_default_status_transitions(_status, _now) do
+    %{
+      finalized_at: nil,
+      marked_uncollectible_at: nil,
+      paid_at: nil,
+      voided_at: nil
+    }
+  end
+
+  # Normalize status_transitions - convert string timestamps to integers
+  defp normalize_status_transitions(transitions) when is_map(transitions) do
+    %{
+      finalized_at: normalize_timestamp(Map.get(transitions, :finalized_at) || Map.get(transitions, "finalized_at")),
+      marked_uncollectible_at:
+        normalize_timestamp(
+          Map.get(transitions, :marked_uncollectible_at) || Map.get(transitions, "marked_uncollectible_at")
+        ),
+      paid_at: normalize_timestamp(Map.get(transitions, :paid_at) || Map.get(transitions, "paid_at")),
+      voided_at: normalize_timestamp(Map.get(transitions, :voided_at) || Map.get(transitions, "voided_at"))
+    }
+  end
+
+  defp normalize_timestamp(nil), do: nil
+  defp normalize_timestamp(value) when is_integer(value), do: value
+  defp normalize_timestamp(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {num, _} -> num
+      :error -> nil
+    end
+  end
+  defp normalize_timestamp(_), do: nil
+
+  # Normalize optional string fields - empty strings should be treated as nil
+  defp normalize_optional_string(params, key) do
+    case Map.get(params, key) do
+      nil -> nil
+      "" -> nil
+      value when is_binary(value) -> value
+      _ -> nil
+    end
   end
 end

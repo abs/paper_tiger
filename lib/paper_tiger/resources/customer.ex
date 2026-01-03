@@ -155,10 +155,13 @@ defmodule PaperTiger.Resources.Customer do
   ## Private Functions
 
   defp build_customer(params) do
+    # Use provided created timestamp or default to now
+    created = get_optional_integer(params, :created) || PaperTiger.now()
+
     %{
       id: generate_id("cus", Map.get(params, :id)),
       object: "customer",
-      created: PaperTiger.now(),
+      created: created,
       email: Map.get(params, :email),
       name: Map.get(params, :name),
       description: Map.get(params, :description),
