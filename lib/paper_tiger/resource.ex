@@ -238,4 +238,51 @@ defmodule PaperTiger.Resource do
   def get_integer(params, key, default \\ 0) do
     params |> Map.get(key, default) |> to_integer()
   end
+
+  @doc """
+  Gets an optional integer param, returning nil if not present.
+
+  Unlike get_integer/3 which defaults to 0, this returns nil when the key
+  is not present, allowing callers to distinguish between "not provided"
+  and "explicitly set to 0".
+
+  ## Examples
+
+      get_optional_integer(%{trial_end: 1234}, :trial_end)  # => 1234
+      get_optional_integer(%{trial_end: "1234"}, :trial_end)  # => 1234
+      get_optional_integer(%{}, :trial_end)  # => nil
+      get_optional_integer(%{trial_end: 0}, :trial_end)  # => 0
+  """
+  def get_optional_integer(params, key) do
+    if Map.has_key?(params, key) do
+      params |> Map.get(key) |> to_integer()
+    else
+      nil
+    end
+  end
+
+  @doc """
+  Normalizes a map by converting string values that look like integers to actual integers.
+
+  Useful for handling form-encoded nested maps where integer values become strings.
+
+  ## Examples
+
+      normalize_integer_map(%{paid_at: "1724870574", voided_at: nil})
+      # => %{paid_at: 1724870574, voided_at: nil}
+  """
+  def normalize_integer_map(map) when is_map(map) do
+    Enum.into(map, %{}, fn
+      {k, v} when is_binary(v) ->
+        case Integer.parse(v) do
+          {int, ""} -> {k, int}
+          _ -> {k, v}
+        end
+
+      {k, v} ->
+        {k, v}
+    end)
+  end
+
+  def normalize_integer_map(nil), do: nil
 end

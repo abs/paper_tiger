@@ -196,29 +196,36 @@ defmodule PaperTiger.Resources.Subscription do
   def list(conn) do
     pagination_opts = parse_pagination_params(conn.params)
 
-    # Get all subscriptions first
-    all_subscriptions =
-      :ets.tab2list(Subscriptions.table_name())
-      |> Enum.map(fn {_id, subscription} -> subscription end)
-
-    # Filter by customer if provided
+    # Filter by customer and/or status if provided
     filtered_subscriptions =
-      case Map.get(conn.params, :customer) do
-        nil ->
-          all_subscriptions
+      case {Map.get(conn.params, :customer), Map.get(conn.params, :status)} do
+        {nil, nil} ->
+          Subscriptions.all()
 
-        customer_id when is_binary(customer_id) ->
-          Enum.filter(all_subscriptions, fn sub -> sub.customer == customer_id end)
+        {customer_id, nil} when is_binary(customer_id) ->
+          Subscriptions.find_by_customer(customer_id)
+
+        {nil, status} ->
+          status_string = if is_atom(status), do: Atom.to_string(status), else: status
+          Subscriptions.find_by_status(status_string)
+
+        {customer_id, status} when is_binary(customer_id) ->
+          status_string = if is_atom(status), do: Atom.to_string(status), else: status
+
+          Subscriptions.find_by_customer(customer_id)
+          |> Enum.filter(fn sub -> sub.status == status_string end)
       end
 
-    # Load subscription items for each subscription in the list
-    subscriptions_with_items =
-      Enum.map(filtered_subscriptions, &load_subscription_items/1)
+    # Load subscription items and latest invoice for each subscription in the list
+    subscriptions_with_details =
+      filtered_subscriptions
+      |> Enum.map(&load_subscription_items/1)
+      |> Enum.map(&load_latest_invoice/1)
 
     # Paginate the filtered results
     result =
       PaperTiger.List.paginate(
-        subscriptions_with_items,
+        subscriptions_with_details,
         Map.put(pagination_opts, :url, "/v1/subscriptions")
       )
 
@@ -268,20 +275,35 @@ defmodule PaperTiger.Resources.Subscription do
 
   defp build_subscription(params) do
     now = PaperTiger.now()
-    trial_days = params |> Map.get(:trial_period_days, 0) |> to_integer()
-    trial_end = if trial_days > 0, do: now + trial_days * 86_400
+
+    # Respect explicit trial_end param if provided, otherwise calculate from trial_period_days
+    trial_end =
+      case get_optional_integer(params, :trial_end) do
+        nil ->
+          trial_days = params |> Map.get(:trial_period_days, 0) |> to_integer()
+          if trial_days > 0, do: now + trial_days * 86_400
+
+        explicit_trial_end ->
+          explicit_trial_end
+      end
 
     # Calculate billing period (default: monthly)
     period_days = 30
     current_period_start = trial_end || now
     current_period_end = current_period_start + period_days * 86_400
 
-    # Determine initial status based on payment_behavior
+    # Determine initial status - respect explicit status param, otherwise derive from context
     status =
-      cond do
-        trial_end -> "trialing"
-        Map.get(params, :payment_behavior) == "default_incomplete" -> "incomplete"
-        true -> "active"
+      case Map.get(params, :status) do
+        nil ->
+          cond do
+            trial_end -> "trialing"
+            Map.get(params, :payment_behavior) == "default_incomplete" -> "incomplete"
+            true -> "active"
+          end
+
+        explicit_status ->
+          explicit_status
       end
 
     %{
@@ -498,14 +520,19 @@ defmodule PaperTiger.Resources.Subscription do
     }
   end
 
-  # Loads the latest invoice for this subscription from the store
+  # Loads the latest invoice ID for this subscription from the store
+  # Note: By default Stripe returns only the invoice ID, not the full object
+  # The full object is returned only when expand: ["latest_invoice"] is passed
   defp load_latest_invoice(subscription) do
-    latest_invoice =
-      Invoices.find_by_subscription(subscription.id)
-      |> Enum.sort_by(& &1.created, :desc)
-      |> List.first()
+    latest_invoice_id =
+      case Invoices.find_by_subscription(subscription.id)
+           |> Enum.sort_by(& &1.created, :desc)
+           |> List.first() do
+        nil -> nil
+        invoice -> invoice.id
+      end
 
-    Map.put(subscription, :latest_invoice, latest_invoice)
+    Map.put(subscription, :latest_invoice, latest_invoice_id)
   end
 
   defp maybe_expand(subscription, params) do

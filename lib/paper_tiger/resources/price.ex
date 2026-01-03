@@ -31,6 +31,7 @@ defmodule PaperTiger.Resources.Price do
 
   import PaperTiger.Resource
 
+  alias PaperTiger.Store.Plans
   alias PaperTiger.Store.Prices
 
   require Logger
@@ -63,6 +64,10 @@ defmodule PaperTiger.Resources.Price do
          price = build_price(conn.params),
          {:ok, price} <- Prices.insert(price) do
       maybe_store_idempotency(conn, price)
+
+      # Stripe auto-creates a Plan for recurring prices (legacy compatibility)
+      # The Plan ID matches the Price ID
+      maybe_create_plan_for_recurring_price(price)
 
       :telemetry.execute([:paper_tiger, :price, :created], %{}, %{object: price})
 
@@ -198,5 +203,32 @@ defmodule PaperTiger.Resources.Price do
       interval: Map.get(recurring, :interval) || Map.get(recurring, "interval"),
       interval_count: Map.get(recurring, :interval_count) || Map.get(recurring, "interval_count") || 1
     }
+  end
+
+  # Stripe automatically creates a Plan object for recurring prices (legacy API compatibility).
+  # The Plan ID matches the Price ID. This enables code using the legacy Plans API to work
+  # with prices created via the newer Prices API.
+  defp maybe_create_plan_for_recurring_price(%{recurring: nil}), do: :ok
+  defp maybe_create_plan_for_recurring_price(%{recurring: recurring} = price) when is_map(recurring) do
+    plan = %{
+      id: price.id,
+      object: "plan",
+      created: price.created,
+      active: price.active,
+      amount: price.unit_amount,
+      amount_decimal: price.unit_amount_decimal,
+      currency: price.currency,
+      interval: recurring.interval,
+      interval_count: recurring.interval_count || 1,
+      livemode: false,
+      metadata: price.metadata || %{},
+      nickname: price.nickname,
+      product: price.product,
+      billing_scheme: price.billing_scheme || "per_unit",
+      usage_type: "licensed"
+    }
+
+    Plans.insert(plan)
+    :ok
   end
 end
