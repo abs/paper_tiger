@@ -120,12 +120,7 @@ defmodule PaperTiger.Resources.PaymentMethodTest do
     end
 
     test "creates payment method with card details" do
-      card = %{
-        "brand" => "visa",
-        "exp_month" => 12,
-        "exp_year" => 2026,
-        "last4" => "4242"
-      }
+      card = PaperTiger.TestClient.test_card_simple()
 
       conn =
         request(:post, "/v1/payment_methods", %{
@@ -138,7 +133,7 @@ defmodule PaperTiger.Resources.PaymentMethodTest do
       assert pm["card"]["brand"] == "visa"
       assert pm["card"]["last4"] == "4242"
       assert pm["card"]["exp_month"] == 12
-      assert pm["card"]["exp_year"] == 2026
+      assert pm["card"]["exp_year"] == 2030
     end
 
     test "creates payment method with metadata" do
@@ -244,12 +239,7 @@ defmodule PaperTiger.Resources.PaymentMethodTest do
             "email" => "jane@example.com",
             "name" => "Jane Doe"
           },
-          "card" => %{
-            "brand" => "visa",
-            "exp_month" => 12,
-            "exp_year" => 2026,
-            "last4" => "4242"
-          },
+          "card" => PaperTiger.TestClient.test_card_simple(),
           "metadata" => %{"key" => "value"},
           "type" => "card"
         })

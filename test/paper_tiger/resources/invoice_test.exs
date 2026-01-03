@@ -242,8 +242,8 @@ defmodule PaperTiger.Resources.InvoiceTest do
 
       conn =
         request(:post, "/v1/invoices", %{
-          "customer" => customer_id,
-          "created" => custom_timestamp
+          "created" => custom_timestamp,
+          "customer" => customer_id
         })
 
       assert conn.status == 200
@@ -261,8 +261,8 @@ defmodule PaperTiger.Resources.InvoiceTest do
           "customer" => customer_id,
           "status" => "paid",
           "status_transitions" => %{
-            "paid_at" => paid_at,
-            "finalized_at" => finalized_at
+            "finalized_at" => finalized_at,
+            "paid_at" => paid_at
           }
         })
 
@@ -272,7 +272,7 @@ defmodule PaperTiger.Resources.InvoiceTest do
       assert invoice["status_transitions"]["finalized_at"] == finalized_at
     end
 
-    test "charge field is nil when not provided" do
+    test "charge field is not present for draft invoices" do
       customer_id = create_customer()
 
       conn =
@@ -282,21 +282,37 @@ defmodule PaperTiger.Resources.InvoiceTest do
 
       assert conn.status == 200
       invoice = json_response(conn)
-      assert is_nil(invoice["charge"])
+      # Real Stripe doesn't include charge key at all for draft invoices
+      refute Map.has_key?(invoice, "charge")
     end
 
-    test "normalizes empty string charge to nil" do
+    test "empty string charge results in no charge key" do
       customer_id = create_customer()
 
       conn =
         request(:post, "/v1/invoices", %{
-          "customer" => customer_id,
-          "charge" => ""
+          "charge" => "",
+          "customer" => customer_id
         })
 
       assert conn.status == 200
       invoice = json_response(conn)
-      assert is_nil(invoice["charge"])
+      # Empty string charge should be treated as no charge
+      refute Map.has_key?(invoice, "charge")
+    end
+
+    test "charge field is included when provided" do
+      customer_id = create_customer()
+
+      conn =
+        request(:post, "/v1/invoices", %{
+          "charge" => "ch_test123",
+          "customer" => customer_id
+        })
+
+      assert conn.status == 200
+      invoice = json_response(conn)
+      assert invoice["charge"] == "ch_test123"
     end
   end
 

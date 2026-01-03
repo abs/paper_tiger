@@ -378,10 +378,10 @@ defmodule PaperTiger.Resources.Invoice do
         transitions -> normalize_status_transitions(transitions)
       end
 
-    %{
+    # Build base invoice - charge is only included when present (not for draft invoices)
+    base_invoice = %{
       id: invoice_id,
       object: "invoice",
-      charge: charge,
       created: created,
       status: status,
       status_transitions: status_transitions,
@@ -418,6 +418,13 @@ defmodule PaperTiger.Resources.Invoice do
       total: total,
       webhooks_delivered_at: nil
     }
+
+    # Only include charge key when there's an actual charge (matches real Stripe behavior)
+    if charge do
+      Map.put(base_invoice, :charge, charge)
+    else
+      base_invoice
+    end
   end
 
   defp load_invoice_lines(invoice) do
@@ -535,12 +542,14 @@ defmodule PaperTiger.Resources.Invoice do
 
   defp normalize_timestamp(nil), do: nil
   defp normalize_timestamp(value) when is_integer(value), do: value
+
   defp normalize_timestamp(value) when is_binary(value) do
     case Integer.parse(value) do
       {num, _} -> num
       :error -> nil
     end
   end
+
   defp normalize_timestamp(_), do: nil
 
   # Normalize optional string fields - empty strings should be treated as nil

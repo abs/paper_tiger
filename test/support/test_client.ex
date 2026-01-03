@@ -209,6 +209,35 @@ defmodule PaperTiger.TestClient do
   """
   def paper_tiger?, do: mode() == :paper_tiger
 
+  @doc """
+  Returns test card data for creating PaymentMethods against real Stripe API.
+
+  Real Stripe API requires actual card number, exp, and cvc.
+  This provides Stripe's standard test card number (4242...).
+  """
+  def test_card do
+    %{
+      "cvc" => "123",
+      "exp_month" => 12,
+      "exp_year" => 2030,
+      "number" => "4242424242424242"
+    }
+  end
+
+  @doc """
+  Returns test card data in PaperTiger format (brand/last4 style).
+
+  PaperTiger accepts a simplified card format for unit tests.
+  """
+  def test_card_simple do
+    %{
+      "brand" => "visa",
+      "exp_month" => 12,
+      "exp_year" => 2030,
+      "last4" => "4242"
+    }
+  end
+
   ## Customer Operations
 
   @doc """

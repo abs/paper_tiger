@@ -181,8 +181,8 @@ defmodule PaperTiger.Resources.CustomerTest do
 
       conn =
         request(:post, "/v1/customers", %{
-          "email" => "custom-time@example.com",
-          "created" => custom_timestamp
+          "created" => custom_timestamp,
+          "email" => "custom-time@example.com"
         })
 
       assert conn.status == 200

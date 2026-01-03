@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.7] - 2026-01-03
+
+### Fixed
+
+- **Invoice `charge` field matches real Stripe behavior**: Draft invoices no longer include the `charge` key at all (not nil, just absent), matching real Stripe API behavior
+
+### Added
+
+- **Centralized test card helpers**: `TestClient.test_card/0` for real Stripe API testing and `TestClient.test_card_simple/0` for PaperTiger-style card data
+
 ## [0.9.6] - 2026-01-03
 
 ### Added

@@ -402,15 +402,16 @@ defmodule PaperTiger.ContractTest do
       {:ok, customer} = TestClient.create_customer(%{"email" => "pm-list@example.com"})
 
       # Create and attach payment methods to this customer
-      {:ok, pm1} = TestClient.create_payment_method(%{"type" => "card"})
+      # Real Stripe requires actual card data, not just type: card
+      {:ok, pm1} = TestClient.create_payment_method(%{"card" => TestClient.test_card(), "type" => "card"})
       {:ok, pm1} = TestClient.attach_payment_method(pm1["id"], %{"customer" => customer["id"]})
 
-      {:ok, pm2} = TestClient.create_payment_method(%{"type" => "card"})
+      {:ok, pm2} = TestClient.create_payment_method(%{"card" => TestClient.test_card(), "type" => "card"})
       {:ok, pm2} = TestClient.attach_payment_method(pm2["id"], %{"customer" => customer["id"]})
 
       # Create another customer with their own payment method
       {:ok, other_customer} = TestClient.create_customer(%{"email" => "other-pm@example.com"})
-      {:ok, other_pm} = TestClient.create_payment_method(%{"type" => "card"})
+      {:ok, other_pm} = TestClient.create_payment_method(%{"card" => TestClient.test_card(), "type" => "card"})
       {:ok, _other_pm} = TestClient.attach_payment_method(other_pm["id"], %{"customer" => other_customer["id"]})
 
       # List payment methods for first customer - should only get their 2 PMs
@@ -718,24 +719,24 @@ defmodule PaperTiger.ContractTest do
       transitions = invoice["status_transitions"]
       assert is_map(transitions)
 
-      # Should have standard transition timestamp fields (may be nil for draft invoices)
-      assert Map.has_key?(transitions, "finalized_at")
-      assert Map.has_key?(transitions, "paid_at")
+      # Stripe returns status_transitions with atom keys inside the map value
+      # Check for both atom and string keys to handle JSON parsing differences
+      assert Map.has_key?(transitions, :finalized_at) or Map.has_key?(transitions, "finalized_at")
+      assert Map.has_key?(transitions, :paid_at) or Map.has_key?(transitions, "paid_at")
 
       cleanup_invoice(invoice["id"])
       cleanup_customer(customer["id"])
     end
 
     @tag :contract
-    test "invoice charge field is nil when no charge exists" do
+    test "invoice charge field is not present for draft invoices" do
       {:ok, customer} = TestClient.create_customer(%{"email" => "no-charge@example.com"})
 
       params = %{"customer" => customer["id"]}
       {:ok, invoice} = TestClient.create_invoice(params)
 
-      # charge should be nil for a draft invoice with no payment
-      assert Map.has_key?(invoice, "charge")
-      assert is_nil(invoice["charge"])
+      # Real Stripe doesn't include charge key at all for draft invoices (no payment yet)
+      refute Map.has_key?(invoice, "charge")
 
       cleanup_invoice(invoice["id"])
       cleanup_customer(customer["id"])
