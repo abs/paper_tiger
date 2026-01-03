@@ -174,6 +174,37 @@ defmodule PaperTiger.Resources.CustomerTest do
       assert customer1["email"] == "first@example.com"
       assert customer2["email"] == "second@example.com"
     end
+
+    test "accepts custom created timestamp" do
+      # Unix timestamp for 2024-01-15 12:00:00 UTC
+      custom_timestamp = 1_705_320_000
+
+      conn =
+        request(:post, "/v1/customers", %{
+          "email" => "custom-time@example.com",
+          "created" => custom_timestamp
+        })
+
+      assert conn.status == 200
+      customer = json_response(conn)
+      assert customer["created"] == custom_timestamp
+      assert customer["email"] == "custom-time@example.com"
+    end
+
+    test "accepts custom id" do
+      custom_id = "cus_custom123"
+
+      conn =
+        request(:post, "/v1/customers", %{
+          "email" => "custom-id@example.com",
+          "id" => custom_id
+        })
+
+      assert conn.status == 200
+      customer = json_response(conn)
+      assert customer["id"] == custom_id
+      assert customer["email"] == "custom-id@example.com"
+    end
   end
 
   describe "GET /v1/customers/:id - Retrieve customer" do

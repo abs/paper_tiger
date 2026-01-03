@@ -234,6 +234,70 @@ defmodule PaperTiger.Resources.InvoiceTest do
       # Should return the same invoice due to idempotency
       assert invoice1["id"] == invoice2["id"]
     end
+
+    test "accepts custom created timestamp" do
+      customer_id = create_customer()
+      # Unix timestamp for 2024-01-15 12:00:00 UTC
+      custom_timestamp = 1_705_320_000
+
+      conn =
+        request(:post, "/v1/invoices", %{
+          "customer" => customer_id,
+          "created" => custom_timestamp
+        })
+
+      assert conn.status == 200
+      invoice = json_response(conn)
+      assert invoice["created"] == custom_timestamp
+    end
+
+    test "accepts status_transitions with timestamps" do
+      customer_id = create_customer()
+      paid_at = 1_705_320_000
+      finalized_at = 1_705_319_000
+
+      conn =
+        request(:post, "/v1/invoices", %{
+          "customer" => customer_id,
+          "status" => "paid",
+          "status_transitions" => %{
+            "paid_at" => paid_at,
+            "finalized_at" => finalized_at
+          }
+        })
+
+      assert conn.status == 200
+      invoice = json_response(conn)
+      assert invoice["status_transitions"]["paid_at"] == paid_at
+      assert invoice["status_transitions"]["finalized_at"] == finalized_at
+    end
+
+    test "charge field is nil when not provided" do
+      customer_id = create_customer()
+
+      conn =
+        request(:post, "/v1/invoices", %{
+          "customer" => customer_id
+        })
+
+      assert conn.status == 200
+      invoice = json_response(conn)
+      assert is_nil(invoice["charge"])
+    end
+
+    test "normalizes empty string charge to nil" do
+      customer_id = create_customer()
+
+      conn =
+        request(:post, "/v1/invoices", %{
+          "customer" => customer_id,
+          "charge" => ""
+        })
+
+      assert conn.status == 200
+      invoice = json_response(conn)
+      assert is_nil(invoice["charge"])
+    end
   end
 
   describe "GET /v1/invoices/:id - Retrieve invoice" do

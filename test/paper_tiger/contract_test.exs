@@ -705,6 +705,41 @@ defmodule PaperTiger.ContractTest do
       cleanup_invoice(invoice["id"])
       cleanup_customer(customer["id"])
     end
+
+    @tag :contract
+    test "invoice status_transitions contains timestamp fields" do
+      {:ok, customer} = TestClient.create_customer(%{"email" => "transitions@example.com"})
+
+      params = %{"customer" => customer["id"]}
+      {:ok, invoice} = TestClient.create_invoice(params)
+
+      # status_transitions should exist and be a map
+      assert Map.has_key?(invoice, "status_transitions")
+      transitions = invoice["status_transitions"]
+      assert is_map(transitions)
+
+      # Should have standard transition timestamp fields (may be nil for draft invoices)
+      assert Map.has_key?(transitions, "finalized_at")
+      assert Map.has_key?(transitions, "paid_at")
+
+      cleanup_invoice(invoice["id"])
+      cleanup_customer(customer["id"])
+    end
+
+    @tag :contract
+    test "invoice charge field is nil when no charge exists" do
+      {:ok, customer} = TestClient.create_customer(%{"email" => "no-charge@example.com"})
+
+      params = %{"customer" => customer["id"]}
+      {:ok, invoice} = TestClient.create_invoice(params)
+
+      # charge should be nil for a draft invoice with no payment
+      assert Map.has_key?(invoice, "charge")
+      assert is_nil(invoice["charge"])
+
+      cleanup_invoice(invoice["id"])
+      cleanup_customer(customer["id"])
+    end
   end
 
   describe "Checkout Session Operations" do
