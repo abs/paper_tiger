@@ -429,6 +429,34 @@ defmodule PaperTiger.TestClient do
     end
   end
 
+  @doc """
+  Lists payment methods for a customer.
+
+  Requires a customer parameter.
+  """
+  def list_payment_methods(params) do
+    case mode() do
+      :real_stripe ->
+        list_payment_methods_real(params)
+
+      :paper_tiger ->
+        list_payment_methods_mock(params)
+    end
+  end
+
+  @doc """
+  Attaches a payment method to a customer.
+  """
+  def attach_payment_method(payment_method_id, params) do
+    case mode() do
+      :real_stripe ->
+        attach_payment_method_real(payment_method_id, params)
+
+      :paper_tiger ->
+        attach_payment_method_mock(payment_method_id, params)
+    end
+  end
+
   ## Charge Operations
 
   @doc """
@@ -583,6 +611,19 @@ defmodule PaperTiger.TestClient do
   end
 
   @doc """
+  Updates an invoice.
+  """
+  def update_invoice(invoice_id, params) do
+    case mode() do
+      :real_stripe ->
+        update_invoice_real(invoice_id, params)
+
+      :paper_tiger ->
+        update_invoice_mock(invoice_id, params)
+    end
+  end
+
+  @doc """
   Finalizes an invoice.
   """
   def finalize_invoice(invoice_id) do
@@ -605,6 +646,23 @@ defmodule PaperTiger.TestClient do
 
       :paper_tiger ->
         pay_invoice_mock(invoice_id)
+    end
+  end
+
+  @doc """
+  Lists invoices with optional filters.
+
+  Supports:
+  - customer: Filter by customer ID
+  - status: Filter by status (draft, open, paid, uncollectible, void)
+  """
+  def list_invoices(params \\ %{}) do
+    case mode() do
+      :real_stripe ->
+        list_invoices_real(params)
+
+      :paper_tiger ->
+        list_invoices_mock(params)
     end
   end
 
@@ -738,6 +796,23 @@ defmodule PaperTiger.TestClient do
     end
   end
 
+  defp list_payment_methods_real(params) do
+    case Stripe.PaymentMethod.list(normalize_params(params), stripe_opts()) do
+      {:ok, %{data: payment_methods, has_more: has_more}} ->
+        {:ok, %{"data" => Enum.map(payment_methods, &stripe_to_map/1), "has_more" => has_more, "object" => "list"}}
+
+      {:error, error} ->
+        {:error, stripe_error_to_map(error)}
+    end
+  end
+
+  defp attach_payment_method_real(payment_method_id, params) do
+    case Stripe.PaymentMethod.attach(payment_method_id, normalize_params(params), stripe_opts()) do
+      {:ok, payment_method} -> {:ok, stripe_to_map(payment_method)}
+      {:error, error} -> {:error, stripe_error_to_map(error)}
+    end
+  end
+
   defp create_invoice_real(params) do
     case Stripe.Invoice.create(normalize_params(params), stripe_opts()) do
       {:ok, invoice} -> {:ok, stripe_to_map(invoice)}
@@ -747,6 +822,13 @@ defmodule PaperTiger.TestClient do
 
   defp get_invoice_real(invoice_id) do
     case Stripe.Invoice.retrieve(invoice_id, %{}, stripe_opts()) do
+      {:ok, invoice} -> {:ok, stripe_to_map(invoice)}
+      {:error, error} -> {:error, stripe_error_to_map(error)}
+    end
+  end
+
+  defp update_invoice_real(invoice_id, params) do
+    case Stripe.Invoice.update(invoice_id, normalize_params(params), stripe_opts()) do
       {:ok, invoice} -> {:ok, stripe_to_map(invoice)}
       {:error, error} -> {:error, stripe_error_to_map(error)}
     end
@@ -763,6 +845,16 @@ defmodule PaperTiger.TestClient do
     case Stripe.Invoice.pay(invoice_id, %{}, stripe_opts()) do
       {:ok, invoice} -> {:ok, stripe_to_map(invoice)}
       {:error, error} -> {:error, stripe_error_to_map(error)}
+    end
+  end
+
+  defp list_invoices_real(params) do
+    case Stripe.Invoice.list(normalize_params(params), stripe_opts()) do
+      {:ok, %{data: invoices, has_more: has_more}} ->
+        {:ok, %{"data" => Enum.map(invoices, &stripe_to_map/1), "has_more" => has_more, "object" => "list"}}
+
+      {:error, error} ->
+        {:error, stripe_error_to_map(error)}
     end
   end
 
@@ -933,6 +1025,16 @@ defmodule PaperTiger.TestClient do
     handle_response(conn)
   end
 
+  defp list_payment_methods_mock(params) do
+    conn = request(:get, "/v1/payment_methods", params)
+    handle_response(conn)
+  end
+
+  defp attach_payment_method_mock(payment_method_id, params) do
+    conn = request(:post, "/v1/payment_methods/#{payment_method_id}/attach", params)
+    handle_response(conn)
+  end
+
   defp create_invoice_mock(params) do
     conn = request(:post, "/v1/invoices", params)
     handle_response(conn)
@@ -943,6 +1045,11 @@ defmodule PaperTiger.TestClient do
     handle_response(conn)
   end
 
+  defp update_invoice_mock(invoice_id, params) do
+    conn = request(:post, "/v1/invoices/#{invoice_id}", params)
+    handle_response(conn)
+  end
+
   defp finalize_invoice_mock(invoice_id) do
     conn = request(:post, "/v1/invoices/#{invoice_id}/finalize", %{})
     handle_response(conn)
@@ -950,6 +1057,11 @@ defmodule PaperTiger.TestClient do
 
   defp pay_invoice_mock(invoice_id) do
     conn = request(:post, "/v1/invoices/#{invoice_id}/pay", %{})
+    handle_response(conn)
+  end
+
+  defp list_invoices_mock(params) do
+    conn = request(:get, "/v1/invoices", params)
     handle_response(conn)
   end
 
