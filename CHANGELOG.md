@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.6] - 2026-01-03
+
+### Added
+
+- **`get_optional_integer/2` helper**: Distinguishes "key not present" from "0" for optional integer params like `trial_end`
+- **`normalize_integer_map/1` helper**: Converts string integer values in maps (e.g., form-encoded params) to actual integers
+- **Auto-create Plan for recurring Prices**: When `Price.create` is called with `recurring` params, a matching Plan object is automatically created (Stripe legacy API compatibility)
+
+### Fixed
+
+- **Subscription default status is "active"**: Fixed bug where subscriptions without trial periods incorrectly defaulted to "trialing" status
+- **Explicit status parameter respected**: `Subscription.create` now respects explicit `status` param instead of always computing it
+- **Subscription list filtering**: Uses `list_namespace/1` for proper namespace-scoped queries instead of undefined store methods
+
 ## [0.9.5] - 2026-01-03
 
 ### Added

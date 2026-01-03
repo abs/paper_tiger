@@ -209,22 +209,23 @@ defmodule PaperTiger.Resources.Price do
   # The Plan ID matches the Price ID. This enables code using the legacy Plans API to work
   # with prices created via the newer Prices API.
   defp maybe_create_plan_for_recurring_price(%{recurring: nil}), do: :ok
+
   defp maybe_create_plan_for_recurring_price(%{recurring: recurring} = price) when is_map(recurring) do
     plan = %{
-      id: price.id,
-      object: "plan",
-      created: price.created,
       active: price.active,
       amount: price.unit_amount,
       amount_decimal: price.unit_amount_decimal,
+      billing_scheme: price.billing_scheme || "per_unit",
+      created: price.created,
       currency: price.currency,
+      id: price.id,
       interval: recurring.interval,
       interval_count: recurring.interval_count || 1,
       livemode: false,
       metadata: price.metadata || %{},
       nickname: price.nickname,
+      object: "plan",
       product: price.product,
-      billing_scheme: price.billing_scheme || "per_unit",
       usage_type: "licensed"
     }
 

@@ -256,8 +256,6 @@ defmodule PaperTiger.Resource do
   def get_optional_integer(params, key) do
     if Map.has_key?(params, key) do
       params |> Map.get(key) |> to_integer()
-    else
-      nil
     end
   end
 
@@ -272,7 +270,7 @@ defmodule PaperTiger.Resource do
       # => %{paid_at: 1724870574, voided_at: nil}
   """
   def normalize_integer_map(map) when is_map(map) do
-    Enum.into(map, %{}, fn
+    Map.new(map, fn
       {k, v} when is_binary(v) ->
         case Integer.parse(v) do
           {int, ""} -> {k, int}

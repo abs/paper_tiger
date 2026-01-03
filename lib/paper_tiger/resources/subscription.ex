@@ -196,24 +196,28 @@ defmodule PaperTiger.Resources.Subscription do
   def list(conn) do
     pagination_opts = parse_pagination_params(conn.params)
 
+    # Get all subscriptions in current namespace
+    all_subscriptions = Subscriptions.list_namespace(PaperTiger.Test.current_namespace())
+
     # Filter by customer and/or status if provided
     filtered_subscriptions =
       case {Map.get(conn.params, :customer), Map.get(conn.params, :status)} do
         {nil, nil} ->
-          Subscriptions.all()
+          all_subscriptions
 
         {customer_id, nil} when is_binary(customer_id) ->
-          Subscriptions.find_by_customer(customer_id)
+          Enum.filter(all_subscriptions, fn sub -> sub.customer == customer_id end)
 
         {nil, status} ->
           status_string = if is_atom(status), do: Atom.to_string(status), else: status
-          Subscriptions.find_by_status(status_string)
+          Enum.filter(all_subscriptions, fn sub -> sub.status == status_string end)
 
         {customer_id, status} when is_binary(customer_id) ->
           status_string = if is_atom(status), do: Atom.to_string(status), else: status
 
-          Subscriptions.find_by_customer(customer_id)
-          |> Enum.filter(fn sub -> sub.status == status_string end)
+          Enum.filter(all_subscriptions, fn sub ->
+            sub.customer == customer_id and sub.status == status_string
+          end)
       end
 
     # Load subscription items and latest invoice for each subscription in the list
@@ -273,38 +277,38 @@ defmodule PaperTiger.Resources.Subscription do
     Map.get(item, field) || Map.get(item, Atom.to_string(field), default)
   end
 
+  defp calculate_trial_end(params, now) do
+    case get_optional_integer(params, :trial_end) do
+      nil ->
+        trial_days = params |> Map.get(:trial_period_days, 0) |> to_integer()
+        if trial_days > 0, do: now + trial_days * 86_400
+
+      explicit_trial_end ->
+        explicit_trial_end
+    end
+  end
+
+  defp determine_subscription_status(params, trial_end) do
+    case Map.get(params, :status) do
+      nil -> derive_status_from_context(params, trial_end)
+      explicit_status -> explicit_status
+    end
+  end
+
+  defp derive_status_from_context(params, trial_end) do
+    cond do
+      trial_end -> "trialing"
+      Map.get(params, :payment_behavior) == "default_incomplete" -> "incomplete"
+      true -> "active"
+    end
+  end
+
   defp build_subscription(params) do
     now = PaperTiger.now()
-
-    # Respect explicit trial_end param if provided, otherwise calculate from trial_period_days
-    trial_end =
-      case get_optional_integer(params, :trial_end) do
-        nil ->
-          trial_days = params |> Map.get(:trial_period_days, 0) |> to_integer()
-          if trial_days > 0, do: now + trial_days * 86_400
-
-        explicit_trial_end ->
-          explicit_trial_end
-      end
-
-    # Calculate billing period (default: monthly)
-    period_days = 30
+    trial_end = calculate_trial_end(params, now)
     current_period_start = trial_end || now
-    current_period_end = current_period_start + period_days * 86_400
-
-    # Determine initial status - respect explicit status param, otherwise derive from context
-    status =
-      case Map.get(params, :status) do
-        nil ->
-          cond do
-            trial_end -> "trialing"
-            Map.get(params, :payment_behavior) == "default_incomplete" -> "incomplete"
-            true -> "active"
-          end
-
-        explicit_status ->
-          explicit_status
-      end
+    current_period_end = current_period_start + 30 * 86_400
+    status = determine_subscription_status(params, trial_end)
 
     %{
       id: generate_id("sub", Map.get(params, :id)),
