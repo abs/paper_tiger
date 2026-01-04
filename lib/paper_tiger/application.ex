@@ -175,9 +175,9 @@ defmodule PaperTiger.Application do
     end
   end
 
-  defp mix_env_upcase do
-    Mix.env() |> Atom.to_string() |> String.upcase()
-  end
+  # Get Mix.env at compile time since Mix isn't available in releases
+  @mix_env_upcase Mix.env() |> Atom.to_string() |> String.upcase()
+  defp mix_env_upcase, do: @mix_env_upcase
 
   defp maybe_add_workers(children) do
     children

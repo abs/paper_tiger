@@ -1,4 +1,5 @@
 defmodule PaperTiger.StripityStripeHackney do
+  @compile {:no_warn_undefined, :hackney}
   @moduledoc """
   HTTP module for stripity_stripe that enables PaperTiger sandbox isolation.
 
