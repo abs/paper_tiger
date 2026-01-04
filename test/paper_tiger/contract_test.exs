@@ -402,17 +402,14 @@ defmodule PaperTiger.ContractTest do
       {:ok, customer} = TestClient.create_customer(%{"email" => "pm-list@example.com"})
 
       # Create and attach payment methods to this customer
-      # Real Stripe requires actual card data, not just type: card
-      {:ok, pm1} = TestClient.create_payment_method(%{"card" => TestClient.test_card(), "type" => "card"})
-      {:ok, pm1} = TestClient.attach_payment_method(pm1["id"], %{"customer" => customer["id"]})
+      # Use pm_card_visa token for real Stripe compatibility
+      {:ok, pm1} = TestClient.attach_payment_method("pm_card_visa", %{"customer" => customer["id"]})
 
-      {:ok, pm2} = TestClient.create_payment_method(%{"card" => TestClient.test_card(), "type" => "card"})
-      {:ok, pm2} = TestClient.attach_payment_method(pm2["id"], %{"customer" => customer["id"]})
+      {:ok, pm2} = TestClient.attach_payment_method("pm_card_mastercard", %{"customer" => customer["id"]})
 
       # Create another customer with their own payment method
       {:ok, other_customer} = TestClient.create_customer(%{"email" => "other-pm@example.com"})
-      {:ok, other_pm} = TestClient.create_payment_method(%{"card" => TestClient.test_card(), "type" => "card"})
-      {:ok, _other_pm} = TestClient.attach_payment_method(other_pm["id"], %{"customer" => other_customer["id"]})
+      {:ok, other_pm} = TestClient.attach_payment_method("pm_card_amex", %{"customer" => other_customer["id"]})
 
       # List payment methods for first customer - should only get their 2 PMs
       {:ok, result} = TestClient.list_payment_methods(%{"customer" => customer["id"]})
