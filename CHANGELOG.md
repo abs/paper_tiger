@@ -11,6 +11,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **StripityStripe adapter now syncs from database instead of Stripe API**: Completely rewrote `PaperTiger.Adapters.StripityStripe` to query local database tables (`billing_customers`, `billing_subscriptions`, `billing_products`, `billing_prices`, `billing_plans`) instead of calling the real Stripe API. This properly mocks Stripe for dev/PR environments using stripity_stripe's local data.
 
+  **Configuration required**: Add to your config:
+
+  ```elixir
+  config :paper_tiger, repo: MyApp.Repo
+  ```
+
+  **Note**: Auto-sync on startup is disabled when using database sync (repo isn't available at PaperTiger startup). You must manually trigger sync after your application starts, typically in your application's `start/2` callback after the repo is started:
+
+  ```elixir
+  # In your application.ex
+  def start(_type, _args) do
+    children = [MyApp.Repo, ...]
+    opts = [strategy: :one_for_one, name: MyApp.Supervisor]
+
+    result = Supervisor.start_link(children, opts)
+
+    # Sync PaperTiger from database after repo is started
+    if Application.get_env(:paper_tiger, :repo) do
+      PaperTiger.Adapters.StripityStripe.sync_all()
+    end
+
+    result
+  end
+  ```
+
 ### Added
 
 - **User adapter architecture**: New `PaperTiger.UserAdapter` behavior allows customizing how user information (name, email) is retrieved for customers during sync
