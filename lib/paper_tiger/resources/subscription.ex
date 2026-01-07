@@ -41,6 +41,7 @@ defmodule PaperTiger.Resources.Subscription do
 
   alias PaperTiger.Store.Customers
   alias PaperTiger.Store.Invoices
+  alias PaperTiger.Store.Plans
   alias PaperTiger.Store.Prices
   alias PaperTiger.Store.SubscriptionItems
   alias PaperTiger.Store.Subscriptions
@@ -358,14 +359,43 @@ defmodule PaperTiger.Resources.Subscription do
 
   # Fetches full price object from store
   # Note: Prices are validated upfront in validate_prices_exist/1, so this should always succeed
+  # Stripe API accepts both price IDs and plan IDs, so we check both stores
   defp fetch_price_object(price_id) when is_binary(price_id) do
     case Prices.get(price_id) do
-      {:ok, price} -> price
-      {:error, :not_found} -> nil
+      {:ok, price} ->
+        price
+
+      {:error, :not_found} ->
+        # Try as plan ID (convert plan to price format for compatibility)
+        case Plans.get(price_id) do
+          {:ok, plan} -> convert_plan_to_price_format(plan)
+          {:error, :not_found} -> nil
+        end
     end
   end
 
   defp fetch_price_object(_), do: nil
+
+  # Convert plan object to price format for compatibility
+  defp convert_plan_to_price_format(plan) do
+    %{
+      active: plan.active,
+      created: plan.created,
+      currency: plan.currency,
+      id: plan.id,
+      livemode: plan.livemode,
+      metadata: plan.metadata || %{},
+      nickname: plan.nickname,
+      object: "price",
+      product: plan.product,
+      recurring: %{
+        interval: plan.interval,
+        interval_count: plan.interval_count
+      },
+      type: "recurring",
+      unit_amount: plan.amount
+    }
+  end
 
   # Validates that the customer exists in the store
   defp validate_customer_exists(customer_id) do
@@ -376,20 +406,36 @@ defmodule PaperTiger.Resources.Subscription do
   end
 
   # Validates that all prices in the items list exist in the store
+  # Note: Stripe accepts both plan IDs and price IDs for the :price key
   defp validate_prices_exist(items) when is_list(items) do
     items
     |> Enum.with_index()
     |> Enum.reduce_while(:ok, fn {item, index}, :ok ->
       price_id = get_item_field(item, :price)
 
-      case Prices.get(price_id) do
-        {:ok, _price} -> {:cont, :ok}
+      # Try to find as price first, then as plan (Stripe API accepts both)
+      case validate_price_or_plan_exists(price_id) do
+        :ok -> {:cont, :ok}
         {:error, :not_found} -> {:halt, {:error, :price_not_found, price_id, index}}
       end
     end)
   end
 
   defp validate_prices_exist(_), do: :ok
+
+  # Helper to check if a price or plan exists (Stripe API accepts both IDs)
+  defp validate_price_or_plan_exists(id) do
+    case Prices.get(id) do
+      {:ok, _price} ->
+        :ok
+
+      {:error, :not_found} ->
+        case Plans.get(id) do
+          {:ok, _plan} -> :ok
+          {:error, :not_found} -> {:error, :not_found}
+        end
+    end
+  end
 
   defp load_subscription_items(subscription) do
     items =

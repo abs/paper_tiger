@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.16] - 2026-01-07
+
+### Changed
+
+- **StripityStripe adapter now syncs from database instead of Stripe API**: Completely rewrote `PaperTiger.Adapters.StripityStripe` to query local database tables (`billing_customers`, `billing_subscriptions`, `billing_products`, `billing_prices`, `billing_plans`) instead of calling the real Stripe API. This properly mocks Stripe for dev/PR environments using stripity_stripe's local data.
+
+### Added
+
+- **User adapter architecture**: New `PaperTiger.UserAdapter` behavior allows customizing how user information (name, email) is retrieved for customers during sync
+- **Auto-discovering user adapter**: `PaperTiger.UserAdapters.AutoDiscover` automatically discovers common user schema patterns including:
+  - Email fields: `email`, `email_address`, or foreign key `primary_email_id` → `emails.address`
+  - Name fields: `name`, `full_name`, or `first_name + last_name`
+  - User tables: `users` or `user`
+- **Plan ID support for subscriptions**: Subscription creation now accepts both `price_id` and `plan_id` (legacy) for the `:price` parameter, matching Stripe API behavior. Plans are automatically converted to price format in responses.
+
 ## [0.9.15] - 2026-01-06
 
 ### Added
