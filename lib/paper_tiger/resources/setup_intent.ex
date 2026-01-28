@@ -30,8 +30,6 @@ defmodule PaperTiger.Resources.SetupIntent do
 
   alias PaperTiger.Store.SetupIntents
 
-  require Logger
-
   @doc """
   Creates a new setup intent.
 

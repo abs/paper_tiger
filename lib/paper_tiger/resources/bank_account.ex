@@ -35,8 +35,6 @@ defmodule PaperTiger.Resources.BankAccount do
 
   alias PaperTiger.Store.BankAccounts
 
-  require Logger
-
   @doc """
   Creates a new bank account.
 

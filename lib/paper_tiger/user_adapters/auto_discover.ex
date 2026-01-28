@@ -13,8 +13,6 @@ defmodule PaperTiger.UserAdapters.AutoDiscover do
 
   @behaviour PaperTiger.UserAdapter
 
-  require Logger
-
   @impl true
   def get_user_info(repo, user_id) do
     with {:ok, user_table} <- discover_user_table(repo),
