@@ -1274,6 +1274,25 @@ defmodule PaperTiger.Resources.SubscriptionTest do
       assert is_nil(updated["latest_invoice"])
     end
 
+    test "does not create proration invoice when no billable items changed", %{
+      subscription: sub
+    } do
+      update_conn =
+        request(:post, "/v1/subscriptions/#{sub["id"]}", %{
+          "metadata" => %{"flag" => "no-billing-change"},
+          "proration_behavior" => "always_invoice"
+        })
+
+      assert update_conn.status == 200
+      updated = json_response(update_conn)
+      assert is_nil(updated["latest_invoice"])
+
+      list_conn = request(:get, "/v1/invoices", %{"subscription" => sub["id"]})
+      assert list_conn.status == 200
+      list = json_response(list_conn)
+      assert list["data"] == []
+    end
+
     test "auto-pays proration invoice when subscription has default_payment_method", %{
       customer: customer,
       price: price,

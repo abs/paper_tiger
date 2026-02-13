@@ -247,11 +247,15 @@ defmodule PaperTiger.Resources.Invoice do
     if is_nil(subscription_id) do
       error_response(conn, PaperTiger.Error.invalid_request("Missing required parameter", "subscription"))
     else
-      case Subscriptions.get(subscription_id) do
-        {:ok, subscription} ->
-          items = load_items_for_preview(subscription_id, conn.params)
-          invoice = build_upcoming_invoice(subscription, items)
-          json_response(conn, 200, invoice)
+      with :ok <-
+             validate_item_collection_quantities(param_value(conn.params, :subscription_items), "subscription_items"),
+           {:ok, subscription} <- Subscriptions.get(subscription_id) do
+        items = load_items_for_preview(subscription_id, conn.params)
+        invoice = build_upcoming_invoice(subscription, items)
+        json_response(conn, 200, invoice)
+      else
+        {:error, :invalid_quantity, field} ->
+          error_response(conn, PaperTiger.Error.invalid_request("Invalid integer", field))
 
         {:error, :not_found} ->
           error_response(conn, PaperTiger.Error.not_found("subscription", subscription_id))
@@ -275,15 +279,18 @@ defmodule PaperTiger.Resources.Invoice do
     if is_nil(subscription_id) do
       error_response(conn, PaperTiger.Error.invalid_request("Missing required parameter", "subscription"))
     else
-      case Subscriptions.get(subscription_id) do
-        {:ok, subscription} ->
-          sd = Map.get(conn.params, :subscription_details) || %{}
-          proposed_items = Map.get(sd, :items) || Map.get(sd, "items") || %{}
-          existing = SubscriptionItems.find_by_subscription(subscription_id)
-          existing_resolved = Enum.map(existing, &resolve_item_for_preview/1)
-          merged = merge_preview_items(subscription_id, proposed_items)
-          invoice = build_preview_invoice(subscription, merged, existing_resolved)
-          json_response(conn, 200, invoice)
+      with :ok <- validate_preview_quantity_params(conn.params),
+           {:ok, subscription} <- Subscriptions.get(subscription_id) do
+        sd = param_value(conn.params, :subscription_details) || %{}
+        proposed_items = param_value(sd, :items) || %{}
+        existing = SubscriptionItems.find_by_subscription(subscription_id)
+        existing_resolved = Enum.map(existing, &resolve_item_for_preview/1)
+        merged = merge_preview_items(subscription_id, proposed_items)
+        invoice = build_preview_invoice(subscription, merged, existing_resolved)
+        json_response(conn, 200, invoice)
+      else
+        {:error, :invalid_quantity, field} ->
+          error_response(conn, PaperTiger.Error.invalid_request("Invalid integer", field))
 
         {:error, :not_found} ->
           error_response(conn, PaperTiger.Error.not_found("subscription", subscription_id))
@@ -625,11 +632,74 @@ defmodule PaperTiger.Resources.Invoice do
 
   ## Upcoming / Preview helpers
 
+  defp param_value(map, key) when is_map(map) do
+    Map.get(map, key) || Map.get(map, Atom.to_string(key))
+  end
+
+  defp parse_quantity(value, default)
+  defp parse_quantity(nil, default), do: {:ok, default}
+  defp parse_quantity(value, _default) when is_integer(value), do: {:ok, value}
+
+  defp parse_quantity(value, _default) when is_binary(value) do
+    case Integer.parse(value) do
+      {num, ""} -> {:ok, num}
+      _ -> :error
+    end
+  end
+
+  defp parse_quantity(_value, _default), do: :error
+
+  defp validate_preview_quantity_params(params) do
+    with :ok <- validate_item_collection_quantities(param_value(params, :subscription_items), "subscription_items") do
+      validate_subscription_details_quantities(params)
+    end
+  end
+
+  defp validate_subscription_details_quantities(params) do
+    subscription_details = param_value(params, :subscription_details) || %{}
+    validate_item_collection_quantities(param_value(subscription_details, :items), "subscription_details[items]")
+  end
+
+  defp validate_item_collection_quantities(nil, _base_field), do: :ok
+
+  defp validate_item_collection_quantities(items, base_field) when is_list(items) do
+    items
+    |> Enum.with_index()
+    |> Enum.reduce_while(:ok, fn {item, idx}, _acc ->
+      case validate_item_quantity(item, "#{base_field}[#{idx}][quantity]") do
+        :ok -> {:cont, :ok}
+        {:error, _reason, _field} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp validate_item_collection_quantities(items, base_field) when is_map(items) do
+    items
+    |> Enum.sort_by(fn {idx, _item} -> to_string(idx) end)
+    |> Enum.reduce_while(:ok, fn {idx, item}, _acc ->
+      case validate_item_quantity(item, "#{base_field}[#{idx}][quantity]") do
+        :ok -> {:cont, :ok}
+        {:error, _reason, _field} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp validate_item_collection_quantities(_items, _base_field), do: :ok
+
+  defp validate_item_quantity(item, field) when is_map(item) do
+    case parse_quantity(param_value(item, :quantity), 1) do
+      {:ok, _} -> :ok
+      :error -> {:error, :invalid_quantity, field}
+    end
+  end
+
+  defp validate_item_quantity(_item, _field), do: :ok
+
   # Load items for upcoming invoice preview. If subscription_items param is
   # provided (proration preview), use those; otherwise use the subscription's
   # current items.
   defp load_items_for_preview(subscription_id, params) do
-    case Map.get(params, :subscription_items) do
+    case param_value(params, :subscription_items) do
       nil ->
         SubscriptionItems.find_by_subscription(subscription_id)
         |> Enum.map(&resolve_item_for_preview/1)
@@ -666,27 +736,29 @@ defmodule PaperTiger.Resources.Invoice do
 
     if !(deleted == true or deleted == "true") do
       price_id = item[:price] || item["price"]
-      quantity = item[:quantity] || item["quantity"] || 1
-      quantity = if is_binary(quantity), do: String.to_integer(quantity), else: quantity
+      quantity = parse_quantity(param_value(item, :quantity), 1)
 
-      if price_id do
+      if price_id and match?({:ok, _}, quantity) do
+        {:ok, quantity_val} = quantity
+
         case Prices.get(to_string(price_id)) do
           {:ok, price} ->
-            %{price_id: price.id, product: price.product, quantity: quantity, unit_amount: price.unit_amount}
+            %{price_id: price.id, product: price.product, quantity: quantity_val, unit_amount: price.unit_amount}
 
           _ ->
-            %{price_id: to_string(price_id), product: nil, quantity: quantity, unit_amount: 0}
+            %{price_id: to_string(price_id), product: nil, quantity: quantity_val, unit_amount: 0}
         end
       else
         # Item update by ID (quantity change) — look up existing subscription item
         item_id = item[:id] || item["id"]
-        quantity_val = item[:quantity] || item["quantity"] || 1
-        quantity_val = if is_binary(quantity_val), do: String.to_integer(quantity_val), else: quantity_val
+        quantity_val = parse_quantity(param_value(item, :quantity), 1)
 
-        if item_id do
+        if item_id and match?({:ok, _}, quantity_val) do
+          {:ok, parsed_quantity} = quantity_val
+
           case lookup_subscription_item_price(to_string(item_id)) do
             {:ok, price_id_str, unit_amount, product} ->
-              %{price_id: price_id_str, product: product, quantity: quantity_val, unit_amount: unit_amount}
+              %{price_id: price_id_str, product: product, quantity: parsed_quantity, unit_amount: unit_amount}
 
             _ ->
               nil
@@ -767,7 +839,7 @@ defmodule PaperTiger.Resources.Invoice do
 
   defp merge_preview_items(subscription_id, proposed_items) do
     existing = SubscriptionItems.find_by_subscription(subscription_id)
-    existing_by_id = Map.new(existing, fn item -> {item.id, item} end)
+    existing_by_id = Map.new(existing, fn item -> {to_string(item.id), item} end)
 
     # proposed_items may be a list (after convert_indexed_maps_to_lists) or an indexed map
     proposed_list =
@@ -781,69 +853,89 @@ defmodule PaperTiger.Resources.Invoice do
           |> Enum.map(fn {_idx, item} -> item end)
       end
 
-    # Track which existing items are being deleted or updated
-    deleted_ids =
-      proposed_list
-      |> Enum.filter(fn item ->
+    {deleted_ids, updated_by_id, new_items} =
+      Enum.reduce(proposed_list, {MapSet.new(), %{}, []}, fn item, {deleted_acc, updated_acc, new_acc} ->
         deleted = item[:deleted] || item["deleted"]
-        deleted == true or deleted == "true"
-      end)
-      |> MapSet.new(fn item -> to_string(item[:id] || item["id"]) end)
-
-    # Build merged items
-    updated_items =
-      proposed_list
-      |> Enum.reject(fn item ->
-        deleted = item[:deleted] || item["deleted"]
-        deleted == true or deleted == "true"
-      end)
-      |> Enum.map(fn item ->
-        price_id = item[:price] || item["price"]
         item_id = item[:id] || item["id"]
-        quantity = item[:quantity] || item["quantity"] || 1
-        quantity = if is_binary(quantity), do: String.to_integer(quantity), else: quantity
+        item_id = if !is_nil(item_id), do: to_string(item_id)
+        price_id = item[:price] || item["price"]
+        quantity = parse_quantity(param_value(item, :quantity), 1)
 
-        if price_id do
-          # New item or item specified by price
-          case Prices.get(to_string(price_id)) do
-            {:ok, price} ->
-              %{price_id: price.id, product: price.product, quantity: quantity, unit_amount: price.unit_amount}
+        cond do
+          deleted in [true, "true"] and is_binary(item_id) ->
+            {MapSet.put(deleted_acc, item_id), Map.delete(updated_acc, item_id), new_acc}
 
-            _ ->
-              %{price_id: to_string(price_id), product: nil, quantity: quantity, unit_amount: 0}
-          end
-        else
-          # Existing item update by ID
-          case Map.get(existing_by_id, to_string(item_id)) do
-            nil ->
-              nil
+          deleted in [true, "true"] ->
+            {deleted_acc, updated_acc, new_acc}
 
-            sub_item ->
-              si_price_id = sub_item[:price] || sub_item.price
-              si_price_id = if is_map(si_price_id), do: si_price_id[:id] || si_price_id["id"], else: si_price_id
+          is_binary(item_id) and Map.has_key?(existing_by_id, item_id) and match?({:ok, _}, quantity) ->
+            {:ok, quantity_val} = quantity
+            sub_item = Map.fetch!(existing_by_id, item_id)
+            resolved_price_id = if is_nil(price_id), do: extract_price_id(sub_item), else: price_id
+            resolved_item = build_preview_item(resolved_price_id, quantity_val)
+            {deleted_acc, Map.put(updated_acc, item_id, resolved_item), new_acc}
 
-              case Prices.get(to_string(si_price_id)) do
-                {:ok, price} ->
-                  %{price_id: price.id, product: price.product, quantity: quantity, unit_amount: price.unit_amount}
+          not is_nil(price_id) and match?({:ok, _}, quantity) ->
+            {:ok, quantity_val} = quantity
+            {deleted_acc, updated_acc, [build_preview_item(price_id, quantity_val) | new_acc]}
 
-                _ ->
-                  %{price_id: to_string(si_price_id), product: nil, quantity: quantity, unit_amount: 0}
-              end
-          end
+          true ->
+            {deleted_acc, updated_acc, new_acc}
         end
       end)
-      |> Enum.reject(&is_nil/1)
-
-    # Include existing items that weren't deleted or updated
-    updated_price_ids = MapSet.new(updated_items, & &1.price_id)
 
     kept_existing =
       existing
-      |> Enum.reject(fn item -> MapSet.member?(deleted_ids, item.id) end)
+      |> Enum.reject(fn item ->
+        item_id = to_string(item.id)
+        MapSet.member?(deleted_ids, item_id) or Map.has_key?(updated_by_id, item_id)
+      end)
       |> Enum.map(&resolve_item_for_preview/1)
-      |> Enum.reject(fn item -> MapSet.member?(updated_price_ids, item.price_id) end)
 
-    updated_items ++ kept_existing
+    updated_existing =
+      existing
+      |> Enum.map(fn item -> Map.get(updated_by_id, to_string(item.id)) end)
+      |> Enum.reject(&is_nil/1)
+
+    updated_existing ++ Enum.reverse(new_items, kept_existing)
+  end
+
+  defp extract_price_id(sub_item) do
+    price_id = sub_item[:price] || sub_item.price
+    if is_map(price_id), do: price_id[:id] || price_id["id"], else: price_id
+  end
+
+  defp build_preview_item(price_id, quantity) do
+    case Prices.get(to_string(price_id)) do
+      {:ok, price} ->
+        %{price_id: price.id, product: price.product, quantity: quantity, unit_amount: price.unit_amount}
+
+      _ ->
+        %{price_id: to_string(price_id), product: nil, quantity: quantity, unit_amount: 0}
+    end
+  end
+
+  defp aggregate_items_by_price(items) do
+    Enum.reduce(items, %{}, fn item, acc ->
+      price_id = item.price_id
+      quantity = item.quantity || 1
+      unit_amount = item.unit_amount || 0
+      amount = unit_amount * quantity
+
+      Map.update(
+        acc,
+        price_id,
+        %{amount: amount, product: item.product, quantity: quantity, unit_amount: unit_amount},
+        fn existing ->
+          %{
+            amount: existing.amount + amount,
+            product: existing.product || item.product,
+            quantity: existing.quantity + quantity,
+            unit_amount: existing.unit_amount
+          }
+        end
+      )
+    end)
   end
 
   defp build_preview_invoice(subscription, items, existing_items) do
@@ -905,8 +997,8 @@ defmodule PaperTiger.Resources.Invoice do
   # Credits for removed/reduced items (negative), charges for added/increased items (positive).
   # Assumes half a billing period remaining for simplicity.
   defp build_proration_lines(existing_items, new_items) do
-    old_by_price = Map.new(existing_items, fn item -> {item.price_id, item} end)
-    new_by_price = Map.new(new_items, fn item -> {item.price_id, item} end)
+    old_by_price = aggregate_items_by_price(existing_items)
+    new_by_price = aggregate_items_by_price(new_items)
 
     all_price_ids = MapSet.union(MapSet.new(Map.keys(old_by_price)), MapSet.new(Map.keys(new_by_price)))
 
@@ -915,8 +1007,8 @@ defmodule PaperTiger.Resources.Invoice do
       old = Map.get(old_by_price, price_id)
       new = Map.get(new_by_price, price_id)
 
-      old_amount = if old, do: (old.unit_amount || 0) * (old.quantity || 1), else: 0
-      new_amount = if new, do: (new.unit_amount || 0) * (new.quantity || 1), else: 0
+      old_amount = if old, do: old.amount, else: 0
+      new_amount = if new, do: new.amount, else: 0
 
       if old_amount == new_amount do
         []
@@ -934,10 +1026,10 @@ defmodule PaperTiger.Resources.Invoice do
               %{
                 amount: credit,
                 currency: "usd",
-                description: "Unused time on #{item.quantity || 1} x (#{price_id})",
+                description: "Unused time on #{if(old, do: old.quantity, else: 0)} x (#{price_id})",
                 id: generate_id("il"),
                 object: "line_item",
-                price: %{id: price_id, product: item.product, unit_amount: item.unit_amount},
+                price: %{id: price_id, product: item.product, unit_amount: if(old, do: old.unit_amount)},
                 proration: true,
                 quantity: if(old, do: old.quantity, else: 0),
                 type: "subscription"
@@ -954,10 +1046,10 @@ defmodule PaperTiger.Resources.Invoice do
               %{
                 amount: charge,
                 currency: "usd",
-                description: "Remaining time on #{item.quantity || 1} x (#{price_id})",
+                description: "Remaining time on #{if(new, do: new.quantity, else: 0)} x (#{price_id})",
                 id: generate_id("il"),
                 object: "line_item",
-                price: %{id: price_id, product: item.product, unit_amount: item.unit_amount},
+                price: %{id: price_id, product: item.product, unit_amount: if(new, do: new.unit_amount)},
                 proration: true,
                 quantity: if(new, do: new.quantity, else: 0),
                 type: "subscription"

@@ -140,6 +140,7 @@ defmodule PaperTiger.Resources.Subscription do
   @spec update(Plug.Conn.t(), String.t()) :: Plug.Conn.t()
   def update(conn, id) do
     with {:ok, existing} <- Subscriptions.get(id),
+         existing_items = SubscriptionItems.find_by_subscription(id),
          coerced_params = coerce_update_params(conn.params),
          updated = merge_updates(existing, coerced_params),
          updated = maybe_update_discount(updated, conn.params),
@@ -150,8 +151,11 @@ defmodule PaperTiger.Resources.Subscription do
         update_subscription_items(id, conn.params.items)
       end
 
+      items_after_update = SubscriptionItems.find_by_subscription(id)
+      billable_items_changed = billable_items_changed?(existing_items, items_after_update)
+
       # Create proration invoice when proration_behavior requests it
-      updated = maybe_create_proration_invoice(updated, conn.params)
+      updated = maybe_create_proration_invoice(updated, conn.params, billable_items_changed)
 
       updated_with_items = load_subscription_items(updated)
       previous_attributes = diff_attributes(existing, updated_with_items)
@@ -676,10 +680,10 @@ defmodule PaperTiger.Resources.Subscription do
 
   # When proration_behavior is set and items changed, Stripe creates a proration
   # invoice and sets latest_invoice on the subscription response.
-  defp maybe_create_proration_invoice(subscription, params) do
+  defp maybe_create_proration_invoice(subscription, params, billable_items_changed?) do
     proration_behavior = Map.get(params, :proration_behavior)
 
-    if proration_behavior in ["always_invoice", "create_prorations"] do
+    if billable_items_changed? and proration_behavior in ["always_invoice", "create_prorations"] do
       items = SubscriptionItems.find_by_subscription(subscription.id)
       now = PaperTiger.now()
       invoice_id = generate_id("in")
@@ -751,6 +755,25 @@ defmodule PaperTiger.Resources.Subscription do
     else
       subscription
     end
+  end
+
+  defp billable_items_changed?(old_items, new_items) do
+    billable_item_signature(old_items) != billable_item_signature(new_items)
+  end
+
+  defp billable_item_signature(items) do
+    Enum.reduce(items, %{}, fn item, acc ->
+      price = item[:price] || item["price"]
+      price_id = if is_map(price), do: price[:id] || price["id"], else: price
+      quantity = item[:quantity] || item["quantity"] || 1
+      quantity = if is_integer(quantity), do: quantity, else: to_integer(quantity)
+
+      if is_nil(price_id) do
+        acc
+      else
+        Map.update(acc, to_string(price_id), quantity, &(&1 + quantity))
+      end
+    end)
   end
 
   # When payment_behavior is "default_incomplete", Stripe creates an initial
